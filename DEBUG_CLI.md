@@ -59,9 +59,11 @@ Poster fixture:
 ```
 
 Shapes are `poster`, `landscape` and `square`; card sizing follows the client's
-real component. Network images are asynchronous. Capture uses the Activity's
-own PixelCopy rendering, including the video surface, rather than computer
-control (capture requires Android API 26 or newer). `watched` is an explicit fixture input; a visible fixture badge does not
+real component. Network images are asynchronous. Capture copies the player's
+SurfaceView during playback, exporting the decoded video without subtitle or
+control overlays. In preview mode it copies the Activity's own window. It does
+not use computer control (capture requires Android API 26 or newer).
+`watched` is an explicit fixture input; a visible fixture badge does not
 verify imported account history. Real TV codec/HDR support must be checked on
 that TV; emulator success does not establish device playback acceptance.
 

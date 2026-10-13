@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.graphics.Bitmap
 import android.view.PixelCopy
+import android.view.SurfaceView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -38,6 +39,7 @@ import kotlinx.serialization.json.*
 class DebugCliActivity : ComponentActivity() {
     private lateinit var player: ExoPlayer
     private lateinit var server: DebugCommandServer
+    private var playerView: PlayerView? = null
     private var mode by mutableStateOf("idle")
     private var previewUrl by mutableStateOf("")
     private var previewShape by mutableStateOf(PosterShape.POSTER)
@@ -65,10 +67,16 @@ class DebugCliActivity : ComponentActivity() {
                         return@post
                     }
                     runCatching {
-                        val view = window.decorView
+                        // The window buffer excludes PlayerView's separate SurfaceView.
+                        // Copy that surface directly for real decoded video frames.
+                        val videoSurface = if (mode == "player") {
+                            require(firstFrame)
+                            requireNotNull(playerView?.videoSurfaceView as? SurfaceView)
+                        } else null
+                        val view = videoSurface ?: window.decorView
                         require(view.width in 1..4096 && view.height in 1..4096)
                         val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
-                        PixelCopy.request(window, bitmap, { code ->
+                        val finished = PixelCopy.OnPixelCopyFinishedListener { code ->
                             try {
                                 if (code != PixelCopy.SUCCESS) result.complete(debugError("capture-failed"))
                                 else {
@@ -77,7 +85,14 @@ class DebugCliActivity : ComponentActivity() {
                                     result.complete(buildJsonObject { put("ok", true); put("file", "files/debug-cli/preview.png") })
                                 }
                             } finally { bitmap.recycle() }
-                        }, main)
+                        }
+                        try {
+                            if (videoSurface != null) PixelCopy.request(videoSurface, bitmap, finished, main)
+                            else PixelCopy.request(window, bitmap, finished, main)
+                        } catch (error: Exception) {
+                            bitmap.recycle()
+                            throw error
+                        }
                     }.onFailure { result.complete(debugError("capture-failed")) }
                 } else result.complete(runCatching { command(request, mediaSourceFactory) }
                     .getOrElse { debugError("command-failed") })
@@ -93,7 +108,8 @@ class DebugCliActivity : ComponentActivity() {
                     if (mode == "player") {
                         AndroidView(factory = { context -> PlayerView(context).apply {
                             player = this@DebugCliActivity.player; useController = false
-                        } }, modifier = Modifier.fillMaxSize())
+                        }.also { playerView = it } }, modifier = Modifier.fillMaxSize(),
+                            onRelease = { if (playerView === it) playerView = null })
                     } else if (mode == "preview") {
                         val density = LocalDensity.current.density
                         ContentCard(
