@@ -1,5 +1,7 @@
 *.iml
 .gradle
+.debug-cli/
+build-debug-cli.log
 /local.properties
 /local.dev.properties
 /.idea/caches
@@ -50,6 +52,8 @@ scripts/*
 !scripts/release_beta.py
 !scripts/tests/
 !scripts/tests/*.py
+!scripts/debug-command.ps1
+!scripts/debug-tv.ps1
 /supabase
 /SUPPORTER_COSMETICS.md
 tv-samples

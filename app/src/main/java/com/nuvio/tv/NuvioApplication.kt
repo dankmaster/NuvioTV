@@ -83,6 +83,14 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        // The fork's isolated diagnostic process does not start account sync or telemetry.
+        if (BuildConfig.DEBUG) {
+            val processName = if (Build.VERSION.SDK_INT >= 28) Application.getProcessName() else {
+                (getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager)
+                    .runningAppProcesses?.firstOrNull { it.pid == android.os.Process.myPid() }?.processName
+            }
+            if (processName?.endsWith(":debugcli") == true) return
+        }
         SentryInitializer.start(this, sentrySettingsDataStore)
         PluginRuntimeHooks.onApplicationCreate(this)
         androidTvChannelSyncService.start()

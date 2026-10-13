@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name="com.nuvio.tv.debug.DebugCliActivity"
+            android:exported="true" android:process=":debugcli" android:launchMode="singleTask"
+            android:label="Nuvio TV Debug CLI" android:configChanges="orientation|screenSize|keyboardHidden" />
+    </application>
+</manifest>
