@@ -42,7 +42,16 @@ The default is muted. `status` returns real playback/buffering/end state,
 position, duration, dimensions, first-frame status, error codes and supported
 audio/subtitle tracks. Commands are asynchronous: inspect status to verify their
 effect. `stop` clears media and `shutdown` closes the Activity and removes the
-host ADB forwarding. No watch history or scrobbling is written by this harness.
+host ADB forwarding. No remote watch history or scrobbling is written by this harness.
+
+`history` accepts a private JSON file with up to 100 `entries` containing
+`contentId`, `contentType`, nullable `season`/`episode` and `watchedAtMs`.
+Supplying entries replaces only this debug package's local watched preferences,
+preserving supplied dates. Up to 10 `queries` use the same identity fields without
+the date. The response contains real `WatchedItemsPreferences.isWatched` matches
+and loaded timestamps. This replays client matching, not cloud delivery or
+series completion. `preview` may use a `lookup` query instead of the explicit
+`watched` flag to render the badge from that real matcher.
 It uses the actual engine and media factory, but does not exercise every setting,
 automatic source choice or lifecycle path of the ordinary player screen.
 

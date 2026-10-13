@@ -8,6 +8,9 @@ import android.view.PixelCopy
 import android.view.SurfaceView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,6 +29,14 @@ import com.nuvio.debug.*
 import com.nuvio.tv.domain.model.ContentType
 import com.nuvio.tv.domain.model.MetaPreview
 import com.nuvio.tv.domain.model.PosterShape
+import com.nuvio.tv.domain.model.WatchedItem
+import com.nuvio.tv.data.local.ProfileDataStore
+import com.nuvio.tv.data.local.ProfileDataStoreFactory
+import com.nuvio.tv.data.local.WatchedItemsPreferences
+import com.nuvio.tv.core.profile.ProfileManager
+import com.google.gson.Gson
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.nuvio.tv.ui.components.ContentCard
 import com.nuvio.tv.ui.components.PosterCardStyle
 import com.nuvio.tv.ui.screens.player.PlayerMediaSourceFactory
@@ -34,11 +45,15 @@ import java.io.File
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.*
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 
 /** Debug-only Activity and process, driven through ADB-forwarded localhost TCP. */
 class DebugCliActivity : ComponentActivity() {
     private lateinit var player: ExoPlayer
     private lateinit var server: DebugCommandServer
+    private lateinit var watched: WatchedItemsPreferences
+    private lateinit var historyFactory: ProfileDataStoreFactory
     private var playerView: PlayerView? = null
     private var mode by mutableStateOf("idle")
     private var previewUrl by mutableStateOf("")
@@ -50,6 +65,11 @@ class DebugCliActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        historyFactory = ProfileDataStoreFactory(applicationContext)
+        val profiles = ProfileManager(ProfileDataStore(applicationContext,
+            Moshi.Builder().add(KotlinJsonAdapterFactory()).build()), historyFactory, emptySet(), applicationContext)
+        watched = WatchedItemsPreferences(historyFactory, profiles)
         player = ExoPlayer.Builder(this).build().apply {
             volume = 0f
             addListener(object : Player.Listener {
@@ -61,6 +81,19 @@ class DebugCliActivity : ComponentActivity() {
             val result = CompletableFuture<JsonObject>()
             main.post {
                 if (result.isCancelled) return@post
+                if (request["command"]?.jsonPrimitive?.content == "history" || request.containsKey("lookup")) {
+                    lifecycleScope.launch {
+                        result.complete(runCatching {
+                            if (request["command"]?.jsonPrimitive?.content == "history") history(request)
+                            else {
+                                val matched = historyLookup(request["lookup"]!!.jsonObject)
+                                val response = command(JsonObject(request + ("watched" to JsonPrimitive(matched))), mediaSourceFactory)
+                                JsonObject(response + ("watched" to JsonPrimitive(matched)) + ("historyLookup" to JsonPrimitive(true)))
+                            }
+                        }.getOrElse { debugError("command-failed") })
+                    }
+                    return@post
+                }
                 if (request["command"]?.jsonPrimitive?.content == "render") {
                     if (android.os.Build.VERSION.SDK_INT < 26) {
                         result.complete(debugError("capture-requires-api-26"))
@@ -153,6 +186,40 @@ class DebugCliActivity : ComponentActivity() {
                     put("supported", group.isTrackSupported(i)); put("codec", format.codecs ?: "")
                 })
             }
+        }
+    }
+
+    private suspend fun historyLookup(query: JsonObject) = watched.isWatched(
+        query["contentId"]!!.jsonPrimitive.content,
+        query["season"]?.jsonPrimitive?.intOrNull,
+        query["episode"]?.jsonPrimitive?.intOrNull,
+    ).first()
+
+    private suspend fun history(request: JsonObject): JsonObject {
+        // Uses the real preferences decoder and matcher, in this debug package only.
+        request["entries"]?.jsonArray?.let { entries ->
+            require(entries.size <= 100)
+            val items = entries.map { value ->
+                val entry = value.jsonObject
+                val id = entry["contentId"]!!.jsonPrimitive.content
+                val type = entry["contentType"]!!.jsonPrimitive.content
+                require(Regex("(?:tt\\d{5,12}|tmdb:[1-9]\\d*)").matches(id))
+                require(type in listOf("movie", "series"))
+                WatchedItem(contentId = id, contentType = type, title = "Debug history",
+                    season = entry["season"]?.jsonPrimitive?.intOrNull,
+                    episode = entry["episode"]?.jsonPrimitive?.intOrNull,
+                    watchedAt = entry["watchedAtMs"]!!.jsonPrimitive.long.also { require(it > 0) })
+            }
+            historyFactory.get(1, "watched_items_preferences").edit {
+                it[stringSetPreferencesKey("watched_items")] = items.map { item -> Gson().toJson(item) }.toSet()
+            }
+        }
+        val queries = request["queries"]?.jsonArray ?: JsonArray(emptyList())
+        require(queries.size <= 10)
+        return buildJsonObject {
+            put("ok", true); put("scope", "local-debug-only")
+            put("matches", buildJsonArray { queries.forEach { add(historyLookup(it.jsonObject)) } })
+            put("timestamps", buildJsonArray { watched.observeAllItems(1).first().forEach { add(it.watchedAt) } })
         }
     }
 

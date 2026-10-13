@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Session,
-    [ValidateSet('status','load','play','pause','seek','speed','audio','subtitle','mute','stop','preview','render','shutdown')][string]$Command = 'status',
+    [ValidateSet('status','history','load','play','pause','seek','speed','audio','subtitle','mute','stop','preview','render','shutdown')][string]$Command = 'status',
     [string]$RequestFile,
     [Nullable[long]]$PositionMs,
     [Nullable[double]]$Speed,
